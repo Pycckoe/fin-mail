@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace FinityLabs\FinMail\Mail;
 
+use FinityLabs\FinMail\Enums\EmailStatus;
 use FinityLabs\FinMail\Models\EmailTemplate;
 use FinityLabs\FinMail\Models\EmailTheme;
 use FinityLabs\FinMail\Models\SentEmail;
 use FinityLabs\FinMail\Settings\BrandingSettings;
 use FinityLabs\FinMail\Settings\GeneralSettings;
+use FinityLabs\FinMail\Settings\LoggingSettings;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Mail\Mailable;
@@ -204,6 +206,8 @@ class TemplateMail extends Mailable implements ShouldQueue
      */
     public function send($mailer)
     {
+        $this->ensureLogEntry();
+
         try {
             $result = parent::send($mailer);
 
@@ -215,6 +219,54 @@ class TemplateMail extends Mailable implements ShouldQueue
 
             throw $e;
         }
+    }
+
+    /**
+     * Auto-create a SentEmail log entry when logging is enabled
+     * and no explicit log was provided via withLogging().
+     */
+    protected function ensureLogEntry(): void
+    {
+        if ($this->sentEmailLog) {
+            return;
+        }
+
+        try {
+            $loggingSettings = app(LoggingSettings::class);
+
+            if (! $loggingSettings->enabled) {
+                return;
+            }
+        } catch (\Throwable) {
+            // Settings table may not exist yet (fresh install / migration pending)
+            return;
+        }
+
+        $rendered = $this->getRendered();
+        $mailSettings = app(GeneralSettings::class);
+
+        $templateFrom = $this->emailTemplate->from;
+        $from = $this->overrideFrom
+            ?? (! empty($templateFrom['address']) ? $templateFrom : null)
+            ?? ['address' => $mailSettings->default_from_address, 'name' => $mailSettings->default_from_name];
+
+        $this->sentEmailLog = SentEmail::create([
+            'email_template_id' => $this->emailTemplate->id,
+            'sender' => $from['address'],
+            'to' => collect($this->to)->pluck('address')->all(),
+            'cc' => collect($this->cc)->pluck('address')->all(),
+            'bcc' => collect($this->bcc)->pluck('address')->all(),
+            'subject' => $this->overrideSubject ?? $rendered['subject'],
+            'rendered_body' => $loggingSettings->store_rendered_body
+                ? ($this->overrideBody ?? $rendered['body'])
+                : null,
+            'attachments' => collect($this->fileAttachments)->map(fn (array $f) => [
+                'name' => $f['name'] ?? basename($f['path']),
+                'path' => $f['path'],
+            ])->all(),
+            'status' => EmailStatus::Queued,
+            'sent_by' => auth()->id(),
+        ]);
     }
 
     /*
