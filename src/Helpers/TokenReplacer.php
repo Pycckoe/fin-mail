@@ -161,15 +161,16 @@ class TokenReplacer
     /**
      * Replace {% if model.attribute %} ... {% endif %} conditionals.
      *
-     * Processes innermost conditionals first (those with no nested {% if %}),
-     * then repeats until no conditionals remain — supports arbitrary nesting depth.
+     * Processes innermost conditionals first (those whose body contains no
+     * {% tags), then repeats outward — supports arbitrary nesting depth
+     * and {% else %} branches at every level.
      */
     protected function replaceConditionals(string $content, array $models): string
     {
-        // Match only innermost {% if %} blocks (no nested {% if %} inside the body)
-        $pattern = '/\{%\s*if\s+(.+?)\s*%\}((?:(?!\{%\s*if\s).)*)(?:\{%\s*else\s*%\}((?:(?!\{%\s*if\s).)*)?)?\{%\s*endif\s*%\}/s';
+        // Match innermost {% if %} blocks: token name has no %}, body has no {%
+        $pattern = '/\{%\s*if\s+([^%}]+?)\s*%\}((?:(?!\{%).)*)(?:\{%\s*else\s*%\}((?:(?!\{%).)*)?)?\{%\s*endif\s*%\}/s';
 
-        $maxIterations = 20; // Safety guard
+        $maxIterations = 20; // Safety guard against infinite loops
         $i = 0;
 
         while ($i++ < $maxIterations && preg_match('/\{%\s*if\s/', $content)) {
