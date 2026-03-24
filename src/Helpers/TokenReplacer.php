@@ -160,21 +160,32 @@ class TokenReplacer
 
     /**
      * Replace {% if model.attribute %} ... {% endif %} conditionals.
+     *
+     * Processes innermost conditionals first (those with no nested {% if %}),
+     * then repeats until no conditionals remain — supports arbitrary nesting depth.
      */
     protected function replaceConditionals(string $content, array $models): string
     {
-        $pattern = '/\{%\s*if\s+(.+?)\s*%\}(.*?)(?:\{%\s*else\s*%\}(.*?))?\{%\s*endif\s*%\}/s';
+        // Match only innermost {% if %} blocks (no nested {% if %} inside the body)
+        $pattern = '/\{%\s*if\s+(.+?)\s*%\}((?:(?!\{%\s*if\s).)*)(?:\{%\s*else\s*%\}((?:(?!\{%\s*if\s).)*)?)?\{%\s*endif\s*%\}/s';
 
-        return (string) preg_replace_callback($pattern, function (array $matches) use ($models): string {
-            $token = trim($matches[1]);
-            $truthyContent = $matches[2];
-            $falsyContent = $matches[3] ?? '';
+        $maxIterations = 20; // Safety guard
+        $i = 0;
 
-            $value = $this->resolveToken($token, $models);
-            $isTruthy = ! empty($value) && $value !== 'false';
+        while ($i++ < $maxIterations && preg_match('/\{%\s*if\s/', $content)) {
+            $content = (string) preg_replace_callback($pattern, function (array $matches) use ($models): string {
+                $token = trim($matches[1]);
+                $truthyContent = $matches[2];
+                $falsyContent = $matches[3] ?? '';
 
-            return $isTruthy ? $truthyContent : $falsyContent;
-        }, $content);
+                $value = $this->resolveToken($token, $models);
+                $isTruthy = ! empty($value) && $value !== 'false';
+
+                return $isTruthy ? $truthyContent : $falsyContent;
+            }, $content);
+        }
+
+        return $content;
     }
 
     /**
