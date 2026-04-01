@@ -300,7 +300,10 @@ class TemplateMail extends Mailable implements ShouldQueue
     protected function getRendered(): array
     {
         if (empty($this->rendered)) {
-            $this->rendered = $this->emailTemplate->render($this->models);
+            // Pass locale explicitly so that after queue deserialization
+            // (where SerializesModels reloads the model without locale)
+            // the translatable fields render in the correct language.
+            $this->rendered = $this->emailTemplate->render($this->models, $this->locale);
         }
 
         return $this->rendered;
